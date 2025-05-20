@@ -55,6 +55,7 @@ dependencies {
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
 
+
     // --- DEPENDENCIAS DE FIREBASE Authentication ---
     // Usamos la sintaxis directa porque los alias de libs. no fueron reconocidos.
 
@@ -72,6 +73,7 @@ dependencies {
     // Al usar BoM, no necesitas especificar la versión aquí.
     implementation("com.google.android.gms:play-services-auth:21.3.0")
 
+    implementation("com.google.firebase:firebase-database-ktx")
 
     // --- Dependencias de Test ---
     testImplementation(libs.junit)
