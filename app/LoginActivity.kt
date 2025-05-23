@@ -1,11 +1,11 @@
-package com.example.agrobot // <-- ASEGÚRATE de que este sea el nombre exacto de tu paquete
+package com.example.agrobot 
 
 import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge // Mantenlo si usas la configuración de borde a borde
+import androidx.activity.enableEdgeToEdge 
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -14,27 +14,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import com.example.agrobot.ui.theme.AgroBotTheme // <-- ASEGÚRATE de que este sea el nombre exacto de tu tema
+import com.example.agrobot.ui.theme.AgroBotTheme 
 
-// =================================================================
-// ESTE ES EL CONTENIDO COMPLETO PARA EL ARCHIVO LoginActivity.kt
-// =================================================================
 
-// ========= Clase LoginActivity =========
-// Esta clase es la Actividad de Android que se encargará de mostrar la pantalla de login.
 class LoginActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // enableEdgeToEdge() // Descomenta si usas esta configuración
+        
 
         setContent {
-            AgroBotTheme { // Aplica el tema visual de tu aplicación
-                // Llama a la función Composable que dibuja la pantalla de login.
-                // Le pasamos una función (lambda) que se ejecutará cuando el login sea exitoso.
+            AgroBotTheme { 
+               
                 LoginScreen(
                     onLoginSuccess = { user, pass ->
-                        // --- ACCIÓN AL INICIAR SESIÓN CON ÉXITO ---
-                        // Crea un Intent para navegar a la MainActivity
+                       
                         val intent = Intent(this@LoginActivity, MainActivity::class.java)
                         // Inicia la MainActivity
                         startActivity(intent)
@@ -50,17 +43,12 @@ class LoginActivity : ComponentActivity() {
     }
 }
 
-// ========= Función Composable para la Pantalla de Login =========
-// Esta función define la interfaz de usuario de la pantalla de inicio de sesión.
-// Es una buena práctica ponerla en el mismo archivo que la actividad que la usa si es específica de ella,
-// o en un archivo de UI separado si es reutilizable.
+
 @Composable
 fun LoginScreen(
     onLoginSuccess: (String, String) -> Unit // Función (lambda) que se llama desde el botón al hacer login exitoso
 ) {
-    // Estados en Compose para mantener el texto de los campos y el mensaje de error.
-    // 'remember' ayuda a que el estado persista a través de las redibujadas (recomposiciones).
-    // 'mutableStateOf' crea un estado que, cuando su valor cambia, hace que Compose redibuje la parte afectada de la UI.
+   
     var usuario by remember { mutableStateOf("") } // Estado para el texto del campo de usuario
     var contrasena by remember { mutableStateOf("") } // Estado para el texto del campo de contraseña
     var mensajeError by remember { mutableStateOf<String?>(null) } // Estado para el mensaje de error (inicialmente nulo, no se muestra)
@@ -102,14 +90,13 @@ fun LoginScreen(
             modifier = Modifier.fillMaxWidth()
         )
 
-        // Espacio vertical
+        
         Spacer(modifier = Modifier.height(16.dp))
 
         // Botón de Iniciar Sesión
         Button(
             onClick = {
-                // --- Lógica de Autenticación (Ejemplo simple "quemado") ---
-                // Esta lógica se ejecuta cuando se toca el botón.
+                
                 if (usuario.isEmpty() || contrasena.isEmpty()) {
                     // Si los campos están vacíos, muestra un error.
                     mensajeError = "Por favor, ingresa usuario y contraseña."
@@ -139,8 +126,7 @@ fun LoginScreen(
     }
 }
 
-// ========= Vista Previa para LoginScreen =========
-// Esta función Composable te permite ver el diseño de LoginScreen en la ventana Preview de Android Studio.
+
 @Preview(showBackground = true, name = "Login Screen Preview")
 @Composable
 fun PreviewLoginScreen() {
