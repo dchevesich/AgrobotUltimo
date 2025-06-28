@@ -1,5 +1,6 @@
-package com.example.agrobot // Esta debe ser la ÚNICA declaración de paquete
+package com.example.agrobot
 
+// Importaciones estándar de Android y Compose
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -14,12 +15,14 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.example.agrobot.ui.theme.AgroBotTheme
 
-// Importaciones de Firebase Authentication
+// Importaciones de Firebase
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
+import com.google.firebase.database.DatabaseReference
+import com.google.firebase.database.ktx.database
 
-// Importaciones para Bluetooth y Coroutines
+// Importaciones para Bluetooth
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothDevice
@@ -33,24 +36,26 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.util.UUID
 import android.widget.Toast
+
+// Importaciones para Coroutines y Lifecycle
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.lang.StringBuilder
 
-// Importaciones para Firebase Realtime Database
-import com.google.firebase.database.DatabaseReference
-import com.google.firebase.database.ktx.database
-
+// Importaciones para Almacenamiento Local (SharedPreferences)
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.content.SharedPreferences
 
 // Define el UUID estándar para SPP (Serial Port Profile)
 private const val SPP_UUID = "00001101-0000-1000-8000-00805F9B34FB"
 
-
 class MainActivity : ComponentActivity() {
 
     private lateinit var auth: FirebaseAuth
-    private lateinit var database: DatabaseReference // Instancia de Firebase Realtime Database
+    private lateinit var database: DatabaseReference
 
     // Variables para Bluetooth
     private var bluetoothAdapter: BluetoothAdapter? = null
@@ -65,6 +70,10 @@ class MainActivity : ComponentActivity() {
     // Nombre de tu módulo HC-06 (asegúrate de que sea exacto y que esté emparejado)
     private val HC06_NAME = "HC-06"
 
+    // Constantes para SharedPreferences (Almacenamiento Local Offline)
+    private val PREFS_NAME = "AgroBotOfflineData"
+    private val KEY_PENDING_READINGS = "pending_readings"
+
     // Data class para la estructura de las lecturas de sensor para Firebase
     data class SensorReading(
         val timestamp: Long = System.currentTimeMillis(),
@@ -78,7 +87,6 @@ class MainActivity : ComponentActivity() {
     private val gasValueState = mutableStateOf("--")
     private val humidityStatusState = mutableStateOf("--")
     private val plantingStatusState = mutableStateOf("Pulsa 'Evaluar' para verificar.")
-    // Estado para el indicador de conexión Bluetooth
     private val connectionStatusState = mutableStateOf("Desconectado")
 
 
@@ -107,45 +115,49 @@ class MainActivity : ComponentActivity() {
             startActivityForResult(enableBtIntent, REQUEST_ENABLE_BT)
         } else {
             // Si Bluetooth ya está activado y los permisos concedidos, intenta conectar
-            // Esta llamada es para que la app intente conectar automáticamente al iniciar
             connectToHC06()
         }
         // --- Fin Configuración Bluetooth ---
 
+        // Intenta sincronizar datos pendientes justo después de que la app se inicia
+        // y se conecta (o si ya hay conexión a internet).
+        // Se lanza en un hilo de background para no bloquear la UI.
+        lifecycleScope.launch(Dispatchers.Main) { // Usamos Main para que los Toasts se muestren bien.
+            // Pequeño delay si se necesita asegurar que Firebase Auth esté listo
+            // o simplemente puedes llamar a esto después de que el usuario se loguea exitosamente si usas el mismo flujo
+            if (FirebaseAuth.getInstance().currentUser != null) {
+                syncLocalDataToFirebase()
+            }
+        }
+
 
         setContent {
-            AgroBotTheme { // Aplica el tema de tu aplicación
+            AgroBotTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    // Llama a la función Composable que define la UI principal
                     MainContentScreen(
                         onLogoutClick = {
-                            // Lógica para cerrar sesión con Firebase
                             auth.signOut()
-                            // Navegar de regreso a LoginActivity y borrar la pila de actividades
                             val intent = Intent(this@MainActivity, LoginActivity::class.java)
                             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
                             startActivity(intent)
                         },
                         onSendCommand = { command ->
-                            // Llama a la función para enviar el comando Bluetooth
                             sendBluetoothCommand(command)
                         },
                         onConnectClick = {
-                            // Este botón iniciará la conexión Bluetooth
                             connectToHC06()
                         },
                         onEvaluateClick = {
                             // Cuando se presiona "Tomar Lectura y Evaluar", pide los datos al Arduino
                             sendBluetoothCommand("GET_DATA\n") // Envía el comando "GET_DATA" al Arduino
                         },
-                        // Pasa los estados de los valores de gas y humedad a la Composable
                         gasValue = gasValueState.value,
                         humidityStatus = humidityStatusState.value,
-                        plantingStatus = plantingStatusState.value, // Pasa el estado de evaluación
-                        connectionStatus = connectionStatusState.value // Pasa el estado de conexión
+                        plantingStatus = plantingStatusState.value,
+                        connectionStatus = connectionStatusState.value
                     )
                 }
             }
@@ -158,7 +170,6 @@ class MainActivity : ComponentActivity() {
         if (requestCode == REQUEST_BLUETOOTH_PERMISSIONS) {
             if (grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
                 Toast.makeText(this, "Permisos Bluetooth concedidos.", Toast.LENGTH_SHORT).show()
-                // Si los permisos fueron concedidos, intenta conectar
                 connectToHC06()
             } else {
                 Toast.makeText(this, "Permisos Bluetooth denegados. La app puede no funcionar correctamente.", Toast.LENGTH_LONG).show()
@@ -172,7 +183,6 @@ class MainActivity : ComponentActivity() {
         if (requestCode == REQUEST_ENABLE_BT) {
             if (resultCode == RESULT_OK) {
                 Toast.makeText(this, "Bluetooth activado.", Toast.LENGTH_SHORT).show()
-                // Si Bluetooth fue activado por el usuario, intenta conectar
                 connectToHC06()
             } else {
                 Toast.makeText(this, "Bluetooth es necesario para esta app.", Toast.LENGTH_LONG).show()
@@ -232,31 +242,33 @@ class MainActivity : ComponentActivity() {
 
                 if (hc06Device == null) {
                     runOnUiThread { Toast.makeText(this@MainActivity, "Módulo HC-06 no encontrado. Asegúrate de que esté emparejado y encendido.", Toast.LENGTH_LONG).show() }
-                    runOnUiThread { connectionStatusState.value = "Desconectado" } // Actualiza el estado de conexión
+                    runOnUiThread { connectionStatusState.value = "Desconectado" }
                     return@launch
                 }
 
                 val uuid = UUID.fromString(SPP_UUID)
                 bluetoothSocket = hc06Device.createInsecureRfcommSocketToServiceRecord(uuid)
                 runOnUiThread { Toast.makeText(this@MainActivity, "Intentando conectar a HC-06...", Toast.LENGTH_SHORT).show() }
-                runOnUiThread { connectionStatusState.value = "Conectando..." } // Actualiza el estado de conexión
+                runOnUiThread { connectionStatusState.value = "Conectando..." }
 
-                bluetoothSocket?.connect() // Establecer la conexión
+                bluetoothSocket?.connect()
                 outputStream = bluetoothSocket?.outputStream
                 inputStream = bluetoothSocket?.inputStream
 
                 runOnUiThread { Toast.makeText(this@MainActivity, "¡Conectado a HC-06!", Toast.LENGTH_SHORT).show() }
-                runOnUiThread { connectionStatusState.value = "Conectado" } // Actualiza el estado de conexión a Conectado
+                runOnUiThread { connectionStatusState.value = "Conectado" }
                 // Iniciar la escucha de datos DESPUÉS de una conexión exitosa
                 startListeningForBluetoothData()
+                // Opcional: Intentar sincronizar datos pendientes al conectar Bluetooth
+                syncLocalDataToFirebase()
 
             } catch (e: IOException) {
                 runOnUiThread { Toast.makeText(this@MainActivity, "Error de conexión Bluetooth: ${e.message}", Toast.LENGTH_LONG).show() }
-                runOnUiThread { connectionStatusState.value = "Desconectado" } // Actualiza el estado de conexión a Desconectado
+                runOnUiThread { connectionStatusState.value = "Desconectado" }
                 closeBluetoothConnection()
             } catch (e: SecurityException) {
                 runOnUiThread { Toast.makeText(this@MainActivity, "Error de seguridad Bluetooth: ${e.message}", Toast.LENGTH_LONG).show() }
-                runOnUiThread { connectionStatusState.value = "Desconectado" } // Actualiza el estado de conexión a Desconectado
+                runOnUiThread { connectionStatusState.value = "Desconectado" }
                 closeBluetoothConnection()
             }
         }
@@ -268,48 +280,43 @@ class MainActivity : ComponentActivity() {
             Toast.makeText(this, "Bluetooth no conectado. No se puede enviar el comando.", Toast.LENGTH_SHORT).show()
             return
         }
-        lifecycleScope.launch(Dispatchers.IO) { // Ejecutar en un hilo de background
+        lifecycleScope.launch(Dispatchers.IO) {
             try {
                 outputStream?.write(command.toByteArray())
                 runOnUiThread { Toast.makeText(this@MainActivity, "Comando '$command' enviado.", Toast.LENGTH_SHORT).show() }
             } catch (e: IOException) {
                 runOnUiThread { Toast.makeText(this@MainActivity, "Error al enviar comando: ${e.message}", Toast.LENGTH_LONG).show() }
-                runOnUiThread { connectionStatusState.value = "Desconectado" } // Actualiza el estado si hay error al enviar
+                runOnUiThread { connectionStatusState.value = "Desconectado" }
                 closeBluetoothConnection()
             }
         }
     }
 
     // --- Función para iniciar la escucha de datos del módulo Bluetooth ---
-    // Esta función se activará una vez establecida la conexión
     private fun startListeningForBluetoothData() {
         if (inputStream == null) return
 
-        lifecycleScope.launch(Dispatchers.IO) { // Ejecutar en un hilo de background
-            val buffer = ByteArray(1024) // Buffer para los datos entrantes
-            val readMessage = StringBuilder() // Para construir el mensaje completo
+        lifecycleScope.launch(Dispatchers.IO) {
+            val buffer = ByteArray(1024)
+            val readMessage = StringBuilder()
 
             while (true) {
                 try {
-                    val bytes = inputStream!!.read(buffer) // Leer bytes del flujo de entrada
-                    val incomingData = String(buffer, 0, bytes) // Convertir bytes a String
-                    readMessage.append(incomingData) // Añadir al StringBuilder
+                    val bytes = inputStream!!.read(buffer)
+                    val incomingData = String(buffer, 0, bytes)
+                    readMessage.append(incomingData)
 
-                    // Buscar el caracter de nueva línea para indicar el final de un mensaje
                     val indexOfNewline = readMessage.indexOf('\n')
                     if (indexOfNewline != -1) {
-                        // Extraer el mensaje completo y limpiarlo
                         val fullMessage = readMessage.substring(0, indexOfNewline).trim()
-                        // Procesar el mensaje recibido en el hilo principal de UI
                         processReceivedData(fullMessage)
-                        // Eliminar el mensaje procesado del StringBuilder
                         readMessage.delete(0, indexOfNewline + 1)
                     }
                 } catch (e: IOException) {
                     runOnUiThread { Toast.makeText(this@MainActivity, "Conexión Bluetooth perdida o cerrada.", Toast.LENGTH_LONG).show() }
-                    runOnUiThread { connectionStatusState.value = "Desconectado" } // Actualiza el estado si la conexión se pierde
+                    runOnUiThread { connectionStatusState.value = "Desconectado" }
                     closeBluetoothConnection()
-                    break // Salir del bucle de escucha
+                    break
                 }
             }
         }
@@ -327,130 +334,210 @@ class MainActivity : ComponentActivity() {
             outputStream = null
             inputStream = null
             bluetoothSocket = null
-            runOnUiThread { connectionStatusState.value = "Desconectado" } // Asegura que el estado se actualice
+            runOnUiThread { connectionStatusState.value = "Desconectado" }
         }
     }
 
     // --- Se llama cuando la actividad está a punto de ser destruida ---
     override fun onDestroy() {
         super.onDestroy()
-        // Asegurarse de cerrar la conexión Bluetooth para evitar fugas de recursos
         closeBluetoothConnection()
     }
 
+    // --- Función para verificar si hay conexión a Internet ---
+    private fun isInternetAvailable(): Boolean {
+        val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val network = connectivityManager.activeNetwork ?: return false
+        val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
+        return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+    }
 
     // --- Función para guardar lecturas de sensor en Firebase Realtime Database ---
     fun saveSensorReading(gas: Int, humidity: Int) {
         val userId = FirebaseAuth.getInstance().currentUser?.uid
         if (userId == null) {
-            Toast.makeText(this, "Debe iniciar sesión para guardar datos.", Toast.LENGTH_LONG).show()
+            runOnUiThread { Toast.makeText(this, "Debe iniciar sesión para guardar datos.", Toast.LENGTH_LONG).show() }
             return
         }
 
         val newReading = SensorReading(
             gasValue = gas,
             humidityValue = humidity,
-            userId = userId // Asocia la lectura con el usuario logueado
+            userId = userId
         )
 
-        // Guarda la lectura bajo 'users/userId/readings/' con un ID único generado por push()
         database.child("users").child(userId).child("readings").push().setValue(newReading)
             .addOnSuccessListener { runOnUiThread { Toast.makeText(this@MainActivity, "Lectura guardada en Firebase!", Toast.LENGTH_SHORT).show() } }
             .addOnFailureListener { e -> runOnUiThread { Toast.makeText(this@MainActivity, "Error al guardar lectura en Firebase: ${e.message}", Toast.LENGTH_LONG).show() } }
     }
 
-    // --- Función para evaluar la aptitud y guardar datos ---
-    // Esta función se llamará cuando la app reciba datos del Arduino
-    private fun evaluateAndDisplayResult(gas: Int, humidity: Int) {
-        var statusMessage = ""
-        var shouldSave = false // Variable para decidir si guardar o no
-
-        // AJUSTA ESTOS VALORES SEGÚN TUS PRUEBAS Y CRITERIOS REALES
-        // Si tu sensor de gas da VALORES BAJOS para ALTA CONCENTRACIÓN DE GAS (lo más común con MQ-135)
-        val gasThresholdForGoodAir = 300 // Ejemplo: El gas es "bueno" si la lectura es MAYOR a 300
-        val humidityGood = 0             // 0 = seco (apto), 1 = húmedo (no apto)
-
-        // La condición para ser "apto"
-        if (gas > gasThresholdForGoodAir && humidity == humidityGood) {
-            statusMessage = "¡Condiciones Aptas para Plantado!"
-            shouldSave = true // Si es apto, guardamos en Firebase
-        } else {
-            statusMessage = "Condiciones No Aptas para Plantado. Revisar."
-            shouldSave = false // No guardamos si no es apto (puedes cambiar esto)
-
-            // Añade detalles de por qué no es apto
-            if (gas <= gasThresholdForGoodAir) { // Si el gas es bajo o igual al umbral (malo)
-                statusMessage += "\n- Nivel de gas demasiado alto."
-            }
-            if (humidity != humidityGood) { // Si la humedad no es el valor "bueno" (0 = seco)
-                statusMessage += "\n- Humedad del suelo no adecuada (requiere ser seco)."
-            }
+    // --- NUEVA Función para guardar datos localmente (SharedPreferences) ---
+    private fun saveLocally(gas: Int, humidity: Int) {
+        val sharedPref = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val currentPendingData = sharedPref.getString(KEY_PENDING_READINGS, "")
+        val newEntry = "G:$gas,H:$humidity,T:${System.currentTimeMillis()}\n"
+        with (sharedPref.edit()) {
+            putString(KEY_PENDING_READINGS, currentPendingData + newEntry)
+            apply()
         }
+        runOnUiThread { Toast.makeText(this, "Datos guardados localmente (sin Internet).", Toast.LENGTH_SHORT).show() }
+    }
 
-        // Actualiza el estado de la UI para mostrar el resultado de la evaluación
-        runOnUiThread {
-            plantingStatusState.value = statusMessage
-        }
+    // --- NUEVA Función para sincronizar datos guardados localmente con Firebase ---
+    private fun syncLocalDataToFirebase() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            if (!isInternetAvailable()) {
+                runOnUiThread { Toast.makeText(this@MainActivity, "No hay Internet para sincronizar datos pendientes.", Toast.LENGTH_SHORT).show() }
+                return@launch
+            }
 
-        // Si se decidió guardar, llama a la función de guardado en Firebase
-        if (shouldSave) {
-            saveSensorReading(gas, humidity)
+            val sharedPref = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val pendingReadingsString = sharedPref.getString(KEY_PENDING_READINGS, "")
+
+            if (pendingReadingsString.isNullOrEmpty()) {
+                return@launch
+            }
+
+            val readingsToSync = pendingReadingsString.split('\n').filter { it.isNotBlank() }
+            if (readingsToSync.isEmpty()) {
+                return@launch
+            }
+
+            runOnUiThread { Toast.makeText(this@MainActivity, "Sincronizando ${readingsToSync.size} lectura(s) pendiente(s)...", Toast.LENGTH_LONG).show() }
+
+            val userId = FirebaseAuth.getInstance().currentUser?.uid
+            if (userId == null) {
+                runOnUiThread { Toast.makeText(this@MainActivity, "Debe iniciar sesión para sincronizar datos.", Toast.LENGTH_LONG).show() }
+                return@launch
+            }
+
+            var allSyncedSuccessfully = true
+
+            for (entry in readingsToSync) {
+                try {
+                    val parts = entry.split(",")
+                    var gas = 0
+                    var humidity = 0
+                    var timestamp = System.currentTimeMillis()
+
+                    for (part in parts) {
+                        if (part.startsWith("G:")) gas = part.substring(2).toIntOrNull() ?: 0
+                        else if (part.startsWith("H:")) humidity = part.substring(2).toIntOrNull() ?: -1
+                        else if (part.startsWith("T:")) timestamp = part.substring(2).toLongOrNull() ?: System.currentTimeMillis()
+                    }
+
+                    val newReading = SensorReading(
+                        timestamp = timestamp,
+                        gasValue = gas,
+                        humidityValue = humidity,
+                        userId = userId
+                    )
+                    database.child("users").child(userId).child("readings").push().setValue(newReading)
+                        .addOnFailureListener { e ->
+                            runOnUiThread { Toast.makeText(this@MainActivity, "Error al sincronizar lectura: ${e.message}", Toast.LENGTH_SHORT).show() }
+                            allSyncedSuccessfully = false
+                        }
+                } catch (e: Exception) {
+                    runOnUiThread { Toast.makeText(this@MainActivity, "Error al procesar y subir entrada pendiente: ${e.message}", Toast.LENGTH_SHORT).show() }
+                    allSyncedSuccessfully = false
+                }
+            }
+
+            if (allSyncedSuccessfully && readingsToSync.isNotEmpty()) {
+                with (sharedPref.edit()) {
+                    remove(KEY_PENDING_READINGS)
+                    apply()
+                }
+                runOnUiThread { Toast.makeText(this@MainActivity, "Sincronización de datos pendientes completada.", Toast.LENGTH_SHORT).show() }
+            } else if (!allSyncedSuccessfully) {
+                runOnUiThread { Toast.makeText(this@MainActivity, "Sincronización con errores. Reintentará en próxima conexión.", Toast.LENGTH_LONG).show() }
+            }
         }
     }
 
-    // --- Función para procesar los datos recibidos del Arduino ---
-    // Ahora, solo actualiza la UI y llama a la evaluación
+    // --- Modifica tu función processReceivedData para usar la lógica offline ---
     private fun processReceivedData(data: String) {
-        runOnUiThread { // Asegura que las actualizaciones de UI se hagan en el hilo principal
+        runOnUiThread {
             try {
-                // Asume el formato "G:valorGas,H:valorHumedad"
                 val parts = data.split(",")
                 var gasString = ""
                 var humidityString = ""
 
                 for (part in parts) {
                     if (part.startsWith("G:")) {
-                        gasString = part.substring(2) // Eliminar "G:"
+                        gasString = part.substring(2)
                     } else if (part.startsWith("H:")) {
-                        humidityString = part.substring(2) // Eliminar "H:"
+                        humidityString = part.substring(2)
                     }
                 }
 
-                val gas = gasString.toIntOrNull() ?: 0 // Convertir a Int, si falla, 0
-                val humidity = humidityString.toIntOrNull() ?: -1 // Convertir a Int, si falla, -1
+                val gas = gasString.toIntOrNull() ?: 0
+                val humidity = humidityString.toIntOrNull() ?: -1
 
-                // Actualizar los estados de la UI con los valores recibidos
                 gasValueState.value = "Gas: $gas"
-                // Invertimos la interpretación para la visualización (0=Seca, 1=Húmeda)
                 val humidityText = when (humidity) {
-                    0 -> "Seca" // Ahora 0 significa Seca en la UI
-                    1 -> "Húmeda" // Y 1 significa Húmeda en la UI
-                    else -> "--" // Valor por defecto
+                    0 -> "Seca"
+                    1 -> "Húmeda"
+                    else -> "--"
                 }
                 humidityStatusState.value = "Humedad: $humidityText"
 
-                // Llama a la función de evaluación y decisión de guardado
                 evaluateAndDisplayResult(gas, humidity)
+
+                // --- Lógica para guardar en Firebase o localmente ---
+                if (isInternetAvailable()) {
+                    saveSensorReading(gas, humidity)
+                    syncLocalDataToFirebase()
+                } else {
+                    saveLocally(gas, humidity)
+                }
 
             } catch (e: Exception) {
                 Toast.makeText(this, "Error al procesar datos del Arduino: ${e.message}", Toast.LENGTH_LONG).show()
             }
         }
     }
-}
 
+    // --- Función para evaluar la aptitud y guardar datos (mantienes tu lógica original de evaluación) ---
+    private fun evaluateAndDisplayResult(gas: Int, humidity: Int) {
+        var statusMessage = ""
+
+        // AJUSTA ESTOS VALORES SEGÚN TUS PRUEBAS Y CRITERIOS REALES
+        val gasThresholdForGoodAir = 300 // Ejemplo: El gas es "bueno" si la lectura es MAYOR a 300
+        val humidityGood = 0             // 0 = seco (apto), 1 = húmedo (no apto)
+
+        if (gas > gasThresholdForGoodAir && humidity == humidityGood) {
+            statusMessage = "¡Condiciones Aptas para Plantado!"
+        } else {
+            statusMessage = "Condiciones No Aptas para Plantado. Revisar."
+            if (gas <= gasThresholdForGoodAir) {
+                statusMessage += "\n- Nivel de gas demasiado alto."
+            }
+            if (humidity != humidityGood) {
+                statusMessage += "\n- Humedad del suelo no adecuada (requiere ser seco)."
+            }
+        }
+
+        runOnUiThread {
+            plantingStatusState.value = statusMessage
+        }
+        // La llamada a saveSensorReading o saveLocally se maneja ahora en processReceivedData
+    }
+}
 
 // ========= Función Composable para el Contenido Principal (UI) =========
 @Composable
 fun MainContentScreen(
-    onLogoutClick: () -> Unit, // Función para llamar al hacer clic en Cerrar Sesión
-    onSendCommand: (String) -> Unit, // Función para llamar al enviar un comando (LED)
-    onConnectClick: () -> Unit, // Función para iniciar la conexión Bluetooth
-    onEvaluateClick: () -> Unit, // Función para el botón de tomar lectura y evaluar
-    gasValue: String, // Estado actual del valor del gas (observado por Compose)
-    humidityStatus: String, // Estado actual del estado de humedad (observado por Compose)
-    plantingStatus: String, // Estado actual del resultado de la evaluación de plantado
-    connectionStatus: String // Estado actual del indicador de conexión Bluetooth
+    onLogoutClick: () -> Unit,
+    onSendCommand: (String) -> Unit,
+    onConnectClick: () -> Unit,
+    onEvaluateClick: () -> Unit,
+    gasValue: String,
+    humidityStatus: String,
+    plantingStatus: String,
+    connectionStatus: String
 ) {
     Column(
         modifier = Modifier
@@ -459,7 +546,6 @@ fun MainContentScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Top
     ) {
-        // Título de la pantalla principal
         Text(
             text = "AgroBot - Monitoreo y Control",
             style = MaterialTheme.typography.headlineMedium,
@@ -469,22 +555,19 @@ fun MainContentScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // >>> INDICADOR DE ESTADO DE CONEXIÓN BLUETOOTH <<<
         Text(
             text = "Estado Bluetooth: $connectionStatus",
             style = MaterialTheme.typography.titleMedium,
             color = when (connectionStatus) {
-                "Conectado" -> MaterialTheme.colorScheme.primary // Color verde/azul para conectado
-                "Conectando..." -> MaterialTheme.colorScheme.tertiary // Color amarillo/naranja para conectando
-                else -> MaterialTheme.colorScheme.error // Color rojo para desconectado
+                "Conectado" -> MaterialTheme.colorScheme.primary
+                "Conectando..." -> MaterialTheme.colorScheme.tertiary
+                else -> MaterialTheme.colorScheme.error
             },
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth()
         )
         Spacer(modifier = Modifier.height(8.dp))
-        // >>> FIN INDICADOR <<<
 
-        // Botón para conectar Bluetooth
         Button(
             onClick = onConnectClick,
             modifier = Modifier.fillMaxWidth()
@@ -494,7 +577,6 @@ fun MainContentScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // >>> ELEMENTOS DE UI PARA MOSTRAR DATOS DEL ARDUINO Y EVALUACIÓN <<<
         Text(
             text = "Estado de los Sensores:",
             style = MaterialTheme.typography.titleMedium
@@ -513,22 +595,20 @@ fun MainContentScreen(
         )
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Resultado de la evaluación de plantado
         Text(
             text = "Evaluación para Plantado:",
             style = MaterialTheme.typography.titleMedium
         )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = plantingStatus, // Mostrar el estado de aptitud aquí
+            text = plantingStatus,
             style = MaterialTheme.typography.bodyLarge,
             color = if (plantingStatus.contains("Aptas")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
         )
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Botón para tomar lectura y evaluar
         Button(
-            onClick = onEvaluateClick, // Llama a la nueva función de evaluación
+            onClick = onEvaluateClick,
             modifier = Modifier.fillMaxWidth().height(50.dp)
         ) {
             Text("Tomar Lectura y Evaluar")
@@ -536,10 +616,9 @@ fun MainContentScreen(
 
         Spacer(modifier = Modifier.height(32.dp))
 
-        // >>> ELEMENTOS DE UI PARA ENVIAR COMANDOS AL ARDUINO <<<
         Text(
             text = "Control del Dispositivo:",
-            style = MaterialTheme.typography.titleMedium // CORRECCIÓN: MaterialE a MaterialTheme
+            style = MaterialTheme.typography.titleMedium
         )
         Spacer(modifier = Modifier.height(8.dp))
 
@@ -547,23 +626,17 @@ fun MainContentScreen(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
-            // Botón para encender algo (comando '1' en tu Arduino)
             Button(onClick = { onSendCommand("1\n") }) {
                 Text("Encender LED")
             }
 
-            // Botón para apagar algo (comando '0' en tu Arduino)
             Button(onClick = { onSendCommand("0\n") }) {
                 Text("Apagar LED")
             }
         }
-        // >>> FIN ELEMENTOS DE UI PARA COMANDOS <<<
 
-
-        // Spacer que empuja el botón de Logout hacia abajo
         Spacer(modifier = Modifier.weight(1f))
 
-        // Botón de Cerrar Sesión
         Button(
             onClick = onLogoutClick,
             modifier = Modifier.fillMaxWidth(),
@@ -574,7 +647,6 @@ fun MainContentScreen(
     }
 }
 
-// ========= Vista Previa para el Contenido Principal (Jetpack Compose Preview) =========
 @Preview(showBackground = true, name = "Main Content Preview")
 @Composable
 fun PreviewMainContentScreen() {
@@ -587,7 +659,7 @@ fun PreviewMainContentScreen() {
             gasValue = "Gas: 450",
             humidityStatus = "Humedad: Seca",
             plantingStatus = "¡Apto para plantado!",
-            connectionStatus = "Conectado" // Estado de conexión para el preview
+            connectionStatus = "Conectado"
         )
     }
 }

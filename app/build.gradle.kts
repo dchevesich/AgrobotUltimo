@@ -3,7 +3,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose) // Plugin para Jetpack Compose
-    // >>> APLICA EL PLUGIN DE GOOGLE SERVICES AQUÍ <<<
+
     id("com.google.gms.google-services") // Este plugin leerá el google-services.json
 }
 
@@ -44,8 +44,7 @@ android {
 }
 
 dependencies {
-    // --- Dependencias que ya tenías y que usan libs. ---
-    // Estas NO deberían dar error si ya funcionaban antes.
+
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
@@ -56,26 +55,18 @@ dependencies {
     implementation(libs.androidx.material3)
 
 
-    // --- DEPENDENCIAS DE FIREBASE Authentication ---
-    // Usamos la sintaxis directa porque los alias de libs. no fueron reconocidos.
 
-    // Declara la plataforma de Firebase (BoM - Bill of Materials)
-    // Usar BoM ayuda a que todas las librerías de Firebase que uses sean compatibles entre sí.
-    // SIEMPRE verifica la última versión de BoM en la documentación oficial de Firebase.
-    implementation(platform("com.google.firebase:firebase-bom:32.8.1")) // <-- ### VERIFICAR ÚLTIMA VERSIÓN ###
+    implementation(platform("com.google.firebase:firebase-bom:32.8.1"))
 
-    // Añade la dependencia específica para Firebase Authentication (con extensiones para Kotlin)
-    // Al usar BoM arriba, generalmente NO necesitas especificar la versión aquí.
+
     implementation("com.google.firebase:firebase-auth-ktx")
 
-    // Opcional pero recomendado: Dependencia de Google Play Services para autenticación
-    // (útil para Google Sign-In, a veces requerida indirectamente por Firebase Auth)
-    // Al usar BoM, no necesitas especificar la versión aquí.
+
     implementation("com.google.android.gms:play-services-auth:21.3.0")
 
     implementation("com.google.firebase:firebase-database-ktx")
 
-    // --- Dependencias de Test ---
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
