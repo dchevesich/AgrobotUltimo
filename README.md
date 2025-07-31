@@ -57,9 +57,6 @@ Módulo de Software (App Android): Desarrollada con Kotlin y Jetpack Compose. Se
 
 Configuración y Uso
 1. Configuración del Hardware
-Para configurar el prototipo, sigue el siguiente esquema de conexión:
-
-[Aquí, inserta tu diagrama de conexión corregido. Puedes usar una imagen del diagrama de Fritzing o Circuito.io que has creado.]
 
 2. Código del Microcontrolador
 El código del Arduino se encuentra en la carpeta Arduino/ del repositorio.
